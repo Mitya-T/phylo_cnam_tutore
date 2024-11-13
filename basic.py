@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, redirect, jsonify
+from flask import Flask, request, send_file, redirect, jsonify, render_template, url_for
 from Bio import SeqIO, AlignIO, Phylo
 from Bio.Align.Applications import ClustalOmegaCommandline
 from Bio.Phylo.TreeConstruction import DistanceCalculator
@@ -9,12 +9,13 @@ import io
 import matplotlib.pyplot as plt
 import networkx as nx
 import matplotlib
+from datetime import datetime
 matplotlib.use('Agg')
 
 app = Flask(__name__)
 
 # Define directory for saving output images
-OUTPUT_DIR = "X:\\CNAM\\PROJECT\\trees"
+OUTPUT_DIR = os.path.join(os.getcwd(), 'static')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 @app.route('/', methods=['GET', 'POST'])
@@ -22,7 +23,7 @@ def index():
     if request.method == 'POST':
         # Check if the request contains files
         if 'files' not in request.files:
-            return redirect(request.url)
+            return "No files found in request", 400
 
         files = request.files.getlist('files')
         if not files:
@@ -39,13 +40,13 @@ def index():
                 sequences = list(SeqIO.parse(file_stream, "fasta"))
                 all_sequences.extend(sequences)
 
-        # Create the combined FASTA file
-        combined_fasta_path = "X:\\CNAM\\PROJECT\\combined_sequences.fasta"
+        # Use secure filename and save the combined FASTA file
+        combined_fasta_path = os.path.join(OUTPUT_DIR, "combined_sequences.fasta")
         with open(combined_fasta_path, "w") as output_handle:
             SeqIO.write(all_sequences, output_handle, "fasta")
 
         # Perform sequence alignment
-        aligned_fasta_path = "X:\\CNAM\\PROJECT\\aligned_sequences.aln"
+        aligned_fasta_path = os.path.join(OUTPUT_DIR, "aligned_sequences.aln")
         clustalomega_cline = ClustalOmegaCommandline(
             cmd="E:\\clustal-omega-1.2.2-win64\\clustalo.exe",
             infile=combined_fasta_path,
@@ -226,11 +227,14 @@ def index():
         upgma_tree = upgma(D, names)
 
         # Function to save and plot trees
+        # Function to save and plot trees
         def save_phylo_tree(tree, filename="NJ_tree.png", title="Phylogenetic Tree"):
             fig = plt.figure(figsize=(10, 10))
             axes = fig.add_subplot(1, 1, 1)
             Phylo.draw(tree, do_show=False, axes=axes)
             plt.title(title)
+
+            # Save image in the OUTPUT_DIR
             output_path = os.path.join(OUTPUT_DIR, filename)
             plt.savefig(output_path)
             plt.close(fig)
@@ -244,6 +248,8 @@ def index():
             plt.figure(figsize=(12, 8))
             nx.draw(graph, pos, labels=labels, with_labels=True, node_size=5000, node_color="red", font_size=10, font_weight="bold", arrows=False)
             plt.title(title)
+
+            # Save image in the OUTPUT_DIR
             output_path = os.path.join(OUTPUT_DIR, filename)
             plt.savefig(output_path)
             plt.close()
@@ -262,26 +268,32 @@ def index():
                 pos = add_edges(graph, node.right, pos=pos, x=x+1/layer, y=y-1, layer=layer+1)
             return pos
 
-        # Save the trees
-        save_phylo_tree(nj_tree, filename="NJ_tree.png", title="Neighbor Joining Tree")
-        save_upgma_tree(upgma_tree, filename="UPGMA_tree.png", title="UPGMA Tree")
+        # Render the template with image URLs for display
+        nj_tree_path = 'NJ_tree.png'  # Image saved in the OUTPUT_DIR
+        upgma_tree_path = 'UPGMA_tree.png'  # Image saved in the OUTPUT_DIR
 
-        # Return response with download links
-        return jsonify({
-            "combined_fasta": combined_fasta_path,
-            "aligned_fasta": aligned_fasta_path,
-            "nj_tree": os.path.join(OUTPUT_DIR, "NJ_tree.png"),
-            "upgma_tree": os.path.join(OUTPUT_DIR, "UPGMA_tree.png")
-        })
+        # After saving the trees to OUTPUT_DIR, use static folder for serving
+        save_phylo_tree(nj_tree, filename=nj_tree_path, title="Neighbor Joining Tree")
+        save_upgma_tree(upgma_tree, filename=upgma_tree_path, title="UPGMA Tree")
+
+        timestamp = datetime.now().timestamp()
+
+        # Use url_for to refer to static images
+        return render_template('display_trees.html',
+                       nj_tree_url=url_for('static', filename='NJ_tree.png'),
+                       upgma_tree_url=url_for('static', filename='UPGMA_tree.png'),
+                       timestamp=timestamp)
 
     return '''
     <!doctype html>
     <title>Upload FASTA files</title>
-    <h1>Upload up to 10 FASTA files</h1>
-    <form action="" method="post" enctype="multipart/form-data">
-        <input type="file" name="files" accept=".fasta" multiple>
-        <input type="submit" value="MAKE TREES">
-    </form>
+    <center>
+        <h1>Upload up to 10 FASTA files</h1>
+            <form action="" method="post" enctype="multipart/form-data">
+                <input type="file" name="files" accept=".fasta" multiple>
+                <input type="submit" value="MAKE TREES">
+            </form>
+    </center>
     '''
 
 if __name__ == '__main__':
